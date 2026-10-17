@@ -1,10 +1,18 @@
 services:
+  generator:
+    build: ./scripts
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
   api:
     build: ./api
     ports:
       - "8100:8100"
     volumes:
       - ./data:/app/data
+    depends_on:
+      - generator
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/status')"]
       interval: 10s

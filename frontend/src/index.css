@@ -1,0 +1,391 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-void: #020810;
+  --bg-panel: #061020;
+  --bg-card: #0a1628;
+  --bg-card-hover: #0e1e38;
+  --border: #122040;
+  --border-glow: #1a3060;
+  --text-primary: #c8daf0;
+  --text-secondary: #6888a8;
+  --text-muted: #3a5a7a;
+  --cyan: #00d4ff;
+  --cyan-dim: rgba(0, 212, 255, 0.15);
+  --magenta: #ff3bff;
+  --magenta-dim: rgba(255, 59, 255, 0.12);
+  --red: #ff3b3b;
+  --red-dim: rgba(255, 59, 59, 0.12);
+  --orange: #ffaa00;
+  --orange-dim: rgba(255, 170, 0, 0.12);
+  --green: #00ff88;
+  --green-dim: rgba(0, 255, 136, 0.12);
+  --yellow: #ffe040;
+  --purple: #a855f7;
+
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-void);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg-void);
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(0, 212, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.03) 0%, transparent 50%);
+}
+
+#root {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  font-size: 24px;
+}
+
+.dashboard-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+}
+
+.subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.conn-dot.online {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+
+.conn-dot.offline {
+  background: var(--red);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.conn-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Source toggle                                                        */
+/* ------------------------------------------------------------------ */
+
+.source-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.1);
+}
+
+.toggle-btn:hover:not(.active) {
+  color: var(--text-secondary);
+}
+
+.toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.toggle-dot.live {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.toggle-dot.synthetic {
+  background: var(--purple);
+  box-shadow: 0 0 6px var(--purple);
+}
+
+/* ------------------------------------------------------------------ */
+/* Current position bar                                                */
+/* ------------------------------------------------------------------ */
+
+.current-position {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 18px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.current-position strong {
+  color: var(--cyan);
+}
+
+.source-live { color: var(--green); }
+.source-synth { color: var(--purple); }
+
+/* ------------------------------------------------------------------ */
+/* Stats bar                                                           */
+/* ------------------------------------------------------------------ */
+
+.stats-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 4px;
+}
+
+.glow-blue { color: var(--cyan); text-shadow: 0 0 12px rgba(0, 212, 255, 0.4); }
+.glow-red { color: var(--red); text-shadow: 0 0 12px rgba(255, 59, 59, 0.4); }
+.glow-orange { color: var(--orange); text-shadow: 0 0 12px rgba(255, 170, 0, 0.4); }
+.glow-yellow { color: var(--yellow); text-shadow: 0 0 12px rgba(255, 224, 64, 0.4); }
+.glow-magenta { color: var(--magenta); text-shadow: 0 0 12px rgba(255, 59, 255, 0.4); }
+
+/* ------------------------------------------------------------------ */
+/* Charts                                                              */
+/* ------------------------------------------------------------------ */
+
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.chart-card.wide {
+  margin-bottom: 16px;
+}
+
+.chart-card h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+.current-val {
+  float: right;
+  color: var(--cyan);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Anomaly feed                                                        */
+/* ------------------------------------------------------------------ */
+
+.anomaly-feed {
+  margin-bottom: 40px;
+}
+
+.anomaly-feed h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.no-anomalies {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 30px;
+  font-style: italic;
+}
+
+.anomaly-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.anomaly-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  transition: border-color 0.3s;
+}
+
+.anomaly-card.critical {
+  border-left: 3px solid var(--red);
+  background: var(--red-dim);
+}
+
+.anomaly-card.warning {
+  border-left: 3px solid var(--orange);
+  background: var(--orange-dim);
+}
+
+.anomaly-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.anomaly-icon {
+  font-size: 16px;
+}
+
+.anomaly-type {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.anomaly-severity {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.anomaly-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.anomaly-details {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.anomaly-coords {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animations                                                          */
+/* ------------------------------------------------------------------ */
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.recharts-tooltip-wrapper {
+  pointer-events: none;
+}

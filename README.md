@@ -46,7 +46,7 @@ Real-time satellite monitoring and anomaly detection platform. Retrieves orbital
    - **science** — science missions (~40-50)
 
    Additional CelesTrak groups (`active` ~8,800 payloads, `starlink` ~6,000+, `gps-ops`, `geo`, `military`, etc.) can be added by extending the `CELESTRAK_GROUPS` list in `api/catalog.py`.
-2. **Synthetic mode** — uses the same CelesTrak satellite catalog but adds Gaussian noise to positions and injects anomalies (~10% of readings: orbital deviations, impossible coordinates, connectivity loss). The WebSocket stream picks random catalog satellites and broadcasts synthetic telemetry. The standalone generator (`scripts/generate_iss_stream.py`) can also write ISS-modeled readings to SQLite as a fallback when the catalog is unavailable.
+2. **Synthetic mode** — uses the same CelesTrak satellite catalog but adds Gaussian noise to position and injects anomalies (~10% of readings: orbital deviations, impossible coordinates, connectivity loss). The WebSocket stream picks random catalog satellites and broadcasts synthetic telemetry. The standalone generator (`scripts/generate_iss_stream.py`) can also write ISS-modeled readings to SQLite as a fallback when the catalog is unavailable.
 
 Both modes share the same satellite list. Switching sources clears accumulated state for a fresh view.
 

@@ -5,18 +5,19 @@ Real-time satellite monitoring and anomaly detection platform. Retrieves orbital
 ## Architecture
 
 ```
- ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
- │  CelesTrak OMM API   │  │  Open Notify API     │  │  Synthetic Generator │
- │  (orbital elements)  │  │  (live ISS position) │  │  generate_iss_stream  │
- └──────────┬───────────┘  └──────────┬───────────┘  └──────────┬───────────┘
-            │ HTTP (cached 2h)        │ HTTP poll               │ SQLite write
-            ▼                         ▼                         ▼
+ ┌──────────────────────┐                          ┌──────────────────────┐
+ │  CelesTrak OMM API   │                          │  Synthetic Generator │
+ │  (orbital elements)  │                          │  generate_iss_stream  │
+ └──────────┬───────────┘                          └──────────┬───────────┘
+            │ HTTP (cached 2h)                                │ SQLite write
+            ▼                                                 ▼
  ┌─────────────────────────────────────────────────────────────────────────────┐
  │                            FastAPI Backend                                  │
  │  - SGP4 orbit propagation (289+ satellites)                                │
- │  - three data source modes (celestrak / live / synthetic)                  │
+ │  - two data source modes (celestrak / synthetic)                           │
+ │  - synthetic mode: same catalog, noisy positions + anomaly injection       │
  │  - anomaly detection engine                                                │
- │  - satellite catalog search (by name or NORAD ID)                          │
+ │  - satellite catalog (alphabetical scrollable list)                        │
  │  - conjunction screening (spatial grid algorithm)                           │
  │  - WebSocket broadcast + REST API                                          │
  └────────────────────────────────┬────────────────────────────────────────────┘
@@ -25,8 +26,10 @@ Real-time satellite monitoring and anomaly detection platform. Retrieves orbital
  ┌─────────────────────────────────────────────────────────────────────────────┐
  │                           React Dashboard                                   │
  │  - interactive 3D globe (Three.js) — rotate, zoom, click satellites        │
- │  - source toggle (CelesTrak / Open Notify / Synthetic)                     │
- │  - satellite catalog search with live propagation                          │
+ │  - source toggle (CelesTrak / Synthetic)                                   │
+ │  - scrollable satellite catalog synced with 3D globe selection             │
+ │  - click dot on globe → highlights in catalog + updates charts             │
+ │  - click name in catalog → highlights on globe + updates charts            │
  │  - conjunction screening alert panel                                       │
  │  - ground track scatter plot                                               │
  │  - latitude, longitude, altitude, velocity telemetry charts                │
@@ -37,10 +40,9 @@ Real-time satellite monitoring and anomaly detection platform. Retrieves orbital
 ### Data Sources
 
 1. **CelesTrak mode (default)** — fetches OMM JSON catalogs from CelesTrak (stations, visual, weather, science groups — ~289 objects). Positions are propagated with SGP4 every 30 seconds. The catalog is cached for 2 hours.
-2. **Open Notify mode** — polls `http://api.open-notify.org/iss-now.json` every 5 seconds for the ISS's lat/lon, enriched with simulated altitude and velocity.
-3. **Synthetic mode** — `scripts/generate_iss_stream.py` models the ISS orbit (92.68 min period, 51.6 deg inclination) and writes readings to SQLite with configurable anomaly injection. The API reads new rows from the same database.
+2. **Synthetic mode** — uses the same CelesTrak satellite catalog but adds Gaussian noise to positions and injects anomalies (~10% of readings: orbital deviations, impossible coordinates, connectivity loss). The WebSocket stream picks random catalog satellites and broadcasts synthetic telemetry. The standalone generator (`scripts/generate_iss_stream.py`) can also write ISS-modeled readings to SQLite as a fallback when the catalog is unavailable.
 
-All modes feed the same anomaly detection engine. Switching sources clears accumulated state for a fresh view.
+Both modes share the same satellite list. Switching sources clears accumulated state for a fresh view.
 
 ### Tech Stack
 

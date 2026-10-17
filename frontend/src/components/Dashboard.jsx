@@ -260,6 +260,10 @@ export default function Dashboard({
     <div className="dashboard">
       <header className="dashboard-header">
         <div className="header-left">
+          <div className="connection-status">
+            <span className={`conn-dot ${connected ? "online" : "offline"}`} />
+            <span className="conn-label">{connected ? "Connected" : "Reconnecting..."}</span>
+          </div>
           <div className="logo">
             <span className="logo-icon">{"\u{1F6F0}"}</span>
             <h1>Orbital Monitor</h1>
@@ -268,10 +272,6 @@ export default function Dashboard({
         </div>
         <div className="header-right">
           <SourceToggle source={source} onSwitch={switchSource} />
-          <div className="connection-status">
-            <span className={`conn-dot ${connected ? "online" : "offline"}`} />
-            <span className="conn-label">{connected ? "Connected" : "Reconnecting..."}</span>
-          </div>
         </div>
       </header>
 

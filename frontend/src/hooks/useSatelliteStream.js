@@ -60,6 +60,14 @@ export function useSatelliteStream() {
 
   const switchSource = useCallback(async (mode) => {
     await fetch(`${API_BASE}/api/source/${mode}`, { method: "POST" });
+    setPositions([]);
+    setAnomalies([]);
+    setStats((prev) => ({
+      ...prev,
+      total_readings: 0,
+      total_anomalies: 0,
+      anomalies_by_type: {},
+    }));
   }, []);
 
   useEffect(() => {

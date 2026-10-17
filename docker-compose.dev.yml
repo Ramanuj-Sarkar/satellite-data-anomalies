@@ -1,0 +1,36 @@
+services:
+  generator:
+    build: ./scripts
+    volumes:
+      - ./data:/app/data
+      - ./scripts/generate_iss_stream.py:/app/generate_iss_stream.py
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data
+      - ./api/main.py:/app/main.py
+    depends_on:
+      - generator
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100", "--reload"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/status')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3100:5174"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    depends_on:
+      api:
+        condition: service_healthy

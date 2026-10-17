@@ -97,16 +97,28 @@ npm run dev
 
 Open `http://localhost:5174` in your browser.
 
-### Docker
+### Docker (Production)
 
 ```bash
 docker compose up --build
 ```
 
+Starts all three services (generator, API, frontend with nginx). First build required; rebuild after code changes.
+
 - API: `http://localhost:8100`
 - Dashboard: `http://localhost:3100`
 
-Note: in Docker mode, run the synthetic generator on the host and mount the `data/` volume, or start the generator inside the API container.
+### Docker (Development — Hot Reload)
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Same ports, but source code is mounted as volumes so changes are picked up automatically — no rebuild needed:
+
+- **API** — uvicorn runs with `--reload`, watches `api/main.py`
+- **Frontend** — Vite dev server with HMR, watches `frontend/src/`
+- **Generator** — script file is mounted in; restart the container to pick up changes (`docker compose -f docker-compose.dev.yml restart generator`)
 
 ## Anomaly Detection
 
@@ -194,10 +206,12 @@ satellite-data-anomalies/
 │   ├── Dockerfile
 │   └── package.json
 ├── scripts/
-│   └── generate_iss_stream.py  # Synthetic ISS telemetry generator
+│   ├── generate_iss_stream.py  # Synthetic ISS telemetry generator
+│   └── Dockerfile
 ├── data/
 │   └── satellite.db            # SQLite (gitignored)
-├── docker-compose.yml
+├── docker-compose.yml          # Production (nginx + built assets)
+├── docker-compose.dev.yml      # Development (hot reload)
 └── README.md
 ```
 

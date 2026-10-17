@@ -380,6 +380,12 @@ async def set_source(mode: str) -> dict:
     if mode not in ("live", "synthetic"):
         return {"error": "mode must be 'live' or 'synthetic'"}
     data_source["mode"] = mode
+    position_history.clear()
+    anomaly_log.clear()
+    last_seen_db_ts["ts"] = 0
+    stats["total_readings"] = 0
+    stats["total_anomalies"] = 0
+    stats["anomalies_by_type"] = {"orbital_deviation": 0, "connectivity_loss": 0, "impossible_coords": 0}
     stats["source"] = mode
     await manager.broadcast({"type": "source_changed", "source": mode})
     return {"source": mode}

@@ -39,7 +39,13 @@ Real-time satellite monitoring and anomaly detection platform. Retrieves orbital
 
 ### Data Sources
 
-1. **CelesTrak mode (default)** — fetches OMM JSON catalogs from CelesTrak (stations, visual, weather, science groups — ~289 objects). Positions are propagated with SGP4 every 30 seconds. The catalog is cached for 2 hours.
+1. **CelesTrak mode (default)** — fetches OMM JSON catalogs from CelesTrak (stations, visual, weather, science groups — ~289 objects). Positions are propagated with SGP4 every 30 seconds. The catalog is cached for 2 hours. Note: CelesTrak tracks 27,000+ objects total across all NORAD-cataloged groups. This platform fetches four curated groups to keep the 3D globe performant and avoid large API requests:
+   - **stations** — ISS, Tiangong, crew vehicles (~15-20 objects)
+   - **visual** — bright satellites visible to the naked eye (~150-170)
+   - **weather** — operational weather satellites (~50-60)
+   - **science** — science missions (~40-50)
+
+   Additional CelesTrak groups (`active` ~8,800 payloads, `starlink` ~6,000+, `gps-ops`, `geo`, `military`, etc.) can be added by extending the `CELESTRAK_GROUPS` list in `api/catalog.py`.
 2. **Synthetic mode** — uses the same CelesTrak satellite catalog but adds Gaussian noise to positions and injects anomalies (~10% of readings: orbital deviations, impossible coordinates, connectivity loss). The WebSocket stream picks random catalog satellites and broadcasts synthetic telemetry. The standalone generator (`scripts/generate_iss_stream.py`) can also write ISS-modeled readings to SQLite as a fallback when the catalog is unavailable.
 
 Both modes share the same satellite list. Switching sources clears accumulated state for a fresh view.
@@ -89,11 +95,13 @@ Open `http://localhost:5174` in your browser. You'll see the 3D globe with satel
 python scripts/generate_iss_stream.py --interval 3 --anomaly-rate 0.15
 ```
 
-Then switch to synthetic mode via the dashboard toggle or:
+Then switch to Synthetic mode via the dashboard toggle or:
 
 ```bash
 curl -X POST http://localhost:8100/api/source/synthetic
 ```
+
+In Synthetic mode the API generates noisy positions for the same CelesTrak catalog satellites, so the standalone generator is only needed as a fallback.
 
 Generator flags:
 
@@ -137,11 +145,15 @@ The app retrieves CelesTrak's OMM JSON catalog and propagates positions with SGP
 
 ### Interactive 3D Visualization
 
-Rotate the Earth, zoom in, and select satellite markers to inspect their calculated altitude and speed. The 3D globe renders all catalog satellites as interactive points — cyan for normal, magenta when selected. The ISS orbit trail is drawn as a continuous path. Built with Three.js via react-three-fiber.
+Rotate the Earth, zoom in, and click any satellite dot to inspect it. The 3D globe renders all catalog satellites as interactive points — cyan for normal, magenta when selected. Selecting a satellite on the globe automatically highlights it in the catalog list and updates the telemetry charts. The ISS orbit trail is drawn as a continuous path. Built with Three.js via react-three-fiber.
 
-### Satellite Catalog and Conjunction Screening
+### Satellite Catalog and Selection Sync
 
-Search objects by name or NORAD ID and view their real-time propagated positions (latitude, longitude, altitude, velocity). The screening panel identifies candidate close approaches using a spatial grid algorithm that avoids O(n^2) pairwise distance checks. Close approaches are color-coded by severity: red (<5 km), orange (<15 km), cyan (>15 km).
+The catalog panel shows all satellites in a scrollable alphabetical list. Clicking a satellite name selects it everywhere: the globe highlights and labels the dot, the telemetry charts (latitude, longitude, altitude, velocity) update to show that satellite's data, and the catalog list scrolls to keep the selection visible. Selection works bidirectionally — pick from the list or click on the globe.
+
+### Conjunction Screening
+
+The screening panel identifies candidate close approaches using a spatial grid algorithm that avoids O(n^2) pairwise distance checks. Close approaches are color-coded by severity: red (<5 km), orange (<15 km), cyan (>15 km).
 
 ## Anomaly Detection
 
@@ -176,7 +188,7 @@ Telemetry data is stale — the same coordinates are being repeated across conse
 | GET | `/api/positions?limit=100` | Recent position history |
 | GET | `/api/anomalies?limit=50` | Recent detected anomalies |
 | GET | `/api/source` | Current data source mode |
-| POST | `/api/source/{mode}` | Switch data source (`celestrak`, `live`, or `synthetic`) |
+| POST | `/api/source/{mode}` | Switch data source (`celestrak` or `synthetic`) |
 | GET | `/api/catalog/search?q=ISS` | Search catalog by name or NORAD ID |
 | GET | `/api/catalog/stats` | Catalog size, last fetch time, staleness |
 | GET | `/api/catalog/propagate?norad_id=25544` | Propagate a single satellite to current time |
@@ -228,7 +240,7 @@ satellite-data-anomalies/
 │   │   ├── components/
 │   │   │   ├── Dashboard.jsx      # Main dashboard layout
 │   │   │   ├── Globe.jsx          # Interactive 3D Earth + satellite markers
-│   │   │   ├── CatalogSearch.jsx  # Satellite search by name/NORAD ID
+│   │   │   ├── CatalogSearch.jsx  # Scrollable satellite catalog list (synced with globe)
 │   │   │   └── ScreeningPanel.jsx # Conjunction screening alerts
 │   │   ├── hooks/
 │   │   │   └── useSatelliteStream.js  # WebSocket + REST + catalog client
@@ -265,7 +277,7 @@ satellite-data-anomalies/
 | **LEO** | Low Earth Orbit. Orbits with altitudes between roughly 160 km and 2,000 km. The ISS operates in LEO. |
 | **NORAD ID** | A sequential catalog number assigned to every tracked space object by the North American Aerospace Defense Command. The ISS is NORAD 25544. |
 | **OMM** | Orbital Mean-elements Message. A modern JSON/XML format for distributing satellite orbital elements, replacing the legacy two-line element (TLE) format. Used by CelesTrak's GP (General Perturbations) API. |
-| **Open Notify API** | A free public API (`api.open-notify.org`) that provides the current position of the ISS in real time, returning latitude and longitude as JSON. |
+
 | **Orbital deviation** | An unexpected change in the satellite's position relative to its predicted orbital path. May be caused by planned maneuvers, gravitational perturbation, or spoofed data. |
 | **Orbital period** | The time it takes a satellite to complete one full orbit. The ISS completes one orbit approximately every 92.68 minutes, circling Earth about 15.5 times per day. |
 | **Orbital velocity** | The speed at which a satellite travels along its orbit. The ISS moves at approximately 7.66 km/s (27,600 km/h or 17,150 mph). |
@@ -296,7 +308,7 @@ Every six seconds, the International Space Station crosses 46 kilometers of orbi
 
 3. **Conjunction awareness.** The screening algorithm identifies satellites passing dangerously close to each other — the same class of problem that generates conjunction data messages (CDMs) in operational space surveillance. With ~30,000 tracked objects and growing, automated screening is essential.
 
-4. **Dual-source validation.** The toggle between real catalog data and a synthetic generator with known anomaly injection provides a controlled environment to tune detection thresholds — the same approach used in satellite operations to validate ground software against simulated failure scenarios before trusting it with real missions.
+4. **Dual-source validation.** The toggle between real SGP4-propagated positions and synthetic data (same satellite catalog, injected noise and anomalies) provides a controlled environment to tune detection thresholds — the same approach used in satellite operations to validate ground software against simulated failure scenarios before trusting it with real missions.
 
 5. **Continuous monitoring at machine speed.** A human operator watching a telemetry console might catch a sudden position jump. They will not catch a slow, deliberate drift designed to gradually shift the perceived orbit by 0.1 degrees per reading. Automated threshold-based detection runs on every single data point, at every polling interval, without fatigue.
 

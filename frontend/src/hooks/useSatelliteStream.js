@@ -16,12 +16,16 @@ export function useSatelliteStream() {
     total_readings: 0,
     total_anomalies: 0,
     anomalies_by_type: {},
-    source: "live",
+    source: "celestrak",
+    catalog_size: 0,
   });
-  const [source, setSource] = useState("live");
+  const [source, setSource] = useState("celestrak");
   const [connected, setConnected] = useState(false);
+  const [catalogPositions, setCatalogPositions] = useState([]);
+  const [screeningResults, setScreeningResults] = useState([]);
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const catalogTimer = useRef(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -70,6 +74,37 @@ export function useSatelliteStream() {
     }));
   }, []);
 
+  const searchCatalog = useCallback(async (query) => {
+    if (!query || query.length < 1) return [];
+    const resp = await fetch(`${API_BASE}/api/catalog/search?q=${encodeURIComponent(query)}&limit=20`);
+    return resp.json();
+  }, []);
+
+  const fetchCatalogPositions = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/catalog/positions?limit=300`);
+      const data = await resp.json();
+      setCatalogPositions(data);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const fetchScreening = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/screening?threshold_km=50`);
+      const data = await resp.json();
+      setScreeningResults(data);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const propagateSatellite = useCallback(async (noradId) => {
+    const resp = await fetch(`${API_BASE}/api/catalog/propagate?norad_id=${noradId}`);
+    return resp.json();
+  }, []);
+
   useEffect(() => {
     fetch(`${API_BASE}/api/status`)
       .then((r) => r.json())
@@ -80,11 +115,32 @@ export function useSatelliteStream() {
       .catch(() => {});
 
     connect();
+    fetchCatalogPositions();
+    fetchScreening();
+
+    catalogTimer.current = setInterval(() => {
+      fetchCatalogPositions();
+      fetchScreening();
+    }, 30000);
+
     return () => {
       clearTimeout(reconnectTimer.current);
+      clearInterval(catalogTimer.current);
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [connect, fetchCatalogPositions, fetchScreening]);
 
-  return { positions, anomalies, stats, source, connected, switchSource };
+  return {
+    positions,
+    anomalies,
+    stats,
+    source,
+    connected,
+    switchSource,
+    searchCatalog,
+    catalogPositions,
+    screeningResults,
+    propagateSatellite,
+    fetchCatalogPositions,
+  };
 }

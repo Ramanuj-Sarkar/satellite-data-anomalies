@@ -1,47 +1,54 @@
 # Satellite Anomaly Detection Platform
 
-Real-time ISS telemetry monitoring and anomaly detection. Polls the International Space Station's live position from the Open Notify API — or reads from a synthetic data generator that simulates orbital mechanics and injects anomalies — and surfaces deviations through a live dashboard with ground track visualization, telemetry charts, and an anomaly feed.
+Real-time satellite monitoring and anomaly detection platform. Retrieves orbital elements from CelesTrak's OMM catalog, propagates positions with SGP4, and visualizes ~289 satellites on an interactive 3D globe with live telemetry charts. Selecting a satellite — by clicking its dot on the globe or its name in the catalog list — highlights it everywhere: globe label, catalog highlight, and telemetry charts. Two data source modes: CelesTrak (real SGP4-propagated orbits) and Synthetic (same satellite catalog with noise and anomaly injection). Includes conjunction screening and a real-time anomaly detection engine.
 
 ## Architecture
 
 ```
- ┌──────────────────────┐      ┌──────────────────────┐
- │  Open Notify API     │      │  Synthetic Generator  │
- │  (live ISS position) │      │  generate_iss_stream   │
- └──────────┬───────────┘      └──────────┬────────────┘
-            │ HTTP poll                    │ SQLite write
-            ▼                             ▼
- ┌─────────────────────────────────────────────────────┐
- │                   FastAPI Backend                    │
- │  - dual data source (live / synthetic)              │
- │  - anomaly detection engine                         │
- │  - WebSocket broadcast                              │
- │  - REST API                                         │
- └───────────────────────┬─────────────────────────────┘
-                         │ WebSocket + REST
-                         ▼
- ┌─────────────────────────────────────────────────────┐
- │                React Dashboard                       │
- │  - source toggle (Live / Synthetic)                 │
- │  - ground track scatter plot                        │
- │  - latitude, longitude, altitude, velocity charts   │
- │  - real-time anomaly feed with severity             │
- └─────────────────────────────────────────────────────┘
+ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+ │  CelesTrak OMM API   │  │  Open Notify API     │  │  Synthetic Generator │
+ │  (orbital elements)  │  │  (live ISS position) │  │  generate_iss_stream  │
+ └──────────┬───────────┘  └──────────┬───────────┘  └──────────┬───────────┘
+            │ HTTP (cached 2h)        │ HTTP poll               │ SQLite write
+            ▼                         ▼                         ▼
+ ┌─────────────────────────────────────────────────────────────────────────────┐
+ │                            FastAPI Backend                                  │
+ │  - SGP4 orbit propagation (289+ satellites)                                │
+ │  - three data source modes (celestrak / live / synthetic)                  │
+ │  - anomaly detection engine                                                │
+ │  - satellite catalog search (by name or NORAD ID)                          │
+ │  - conjunction screening (spatial grid algorithm)                           │
+ │  - WebSocket broadcast + REST API                                          │
+ └────────────────────────────────┬────────────────────────────────────────────┘
+                                  │ WebSocket + REST
+                                  ▼
+ ┌─────────────────────────────────────────────────────────────────────────────┐
+ │                           React Dashboard                                   │
+ │  - interactive 3D globe (Three.js) — rotate, zoom, click satellites        │
+ │  - source toggle (CelesTrak / Open Notify / Synthetic)                     │
+ │  - satellite catalog search with live propagation                          │
+ │  - conjunction screening alert panel                                       │
+ │  - ground track scatter plot                                               │
+ │  - latitude, longitude, altitude, velocity telemetry charts                │
+ │  - real-time anomaly feed with severity                                    │
+ └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow
+### Data Sources
 
-1. **Live mode** — the API polls `http://api.open-notify.org/iss-now.json` every 5 seconds for the ISS's current latitude and longitude, enriches with simulated altitude and velocity.
-2. **Synthetic mode** — `scripts/generate_iss_stream.py` models the ISS orbit (92.68 min period, 51.6 deg inclination) and writes readings to SQLite with configurable anomaly injection. The API reads new rows from the same database.
-3. The anomaly detection engine evaluates each reading against orbital physics thresholds and flags deviations.
-4. Readings and detected anomalies are broadcast to all connected dashboard clients via WebSocket.
+1. **CelesTrak mode (default)** — fetches OMM JSON catalogs from CelesTrak (stations, visual, weather, science groups — ~289 objects). Positions are propagated with SGP4 every 30 seconds. The catalog is cached for 2 hours.
+2. **Open Notify mode** — polls `http://api.open-notify.org/iss-now.json` every 5 seconds for the ISS's lat/lon, enriched with simulated altitude and velocity.
+3. **Synthetic mode** — `scripts/generate_iss_stream.py` models the ISS orbit (92.68 min period, 51.6 deg inclination) and writes readings to SQLite with configurable anomaly injection. The API reads new rows from the same database.
+
+All modes feed the same anomaly detection engine. Switching sources clears accumulated state for a fresh view.
 
 ### Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.12, FastAPI, uvicorn, httpx |
-| Frontend | React 19, Vite 8, Recharts |
+| Backend | Python 3.12, FastAPI, uvicorn, httpx, sgp4 |
+| Orbit propagation | SGP4 (Simplified General Perturbations 4) via CelesTrak OMM data |
+| Frontend | React 19, Vite 8, Three.js, @react-three/fiber, @react-three/drei, Recharts |
 | Database | SQLite (WAL mode for concurrent read/write) |
 | Containerization | Docker, docker-compose, nginx reverse proxy |
 
@@ -55,13 +62,36 @@ Real-time ISS telemetry monitoring and anomaly detection. Polls the Internationa
 
 ### Local Development
 
-**1. Start the synthetic data generator:**
+**1. Start the API server:**
+
+```bash
+pip install -r api/requirements.txt
+uvicorn api.main:app --host 0.0.0.0 --port 8100
+```
+
+The API starts in **CelesTrak mode** by default — it fetches the satellite catalog on startup and begins propagating the ISS position with SGP4. No synthetic generator needed for this mode.
+
+**2. Start the frontend:**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5174` in your browser. You'll see the 3D globe with satellite positions, catalog search, and conjunction screening.
+
+**3. (Optional) Start the synthetic generator:**
 
 ```bash
 python scripts/generate_iss_stream.py --interval 3 --anomaly-rate 0.15
 ```
 
-This writes ISS telemetry readings to `data/satellite.db` every 3 seconds, with a 15% chance of anomaly injection per tick.
+Then switch to synthetic mode via the dashboard toggle or:
+
+```bash
+curl -X POST http://localhost:8100/api/source/synthetic
+```
 
 Generator flags:
 
@@ -73,29 +103,6 @@ Generator flags:
 | `--db` | `data/satellite.db` | Database file path |
 | `--stdout` | off | Also print JSON to stdout |
 | `--seed` | None | Random seed for reproducibility |
-
-**2. Start the API server:**
-
-```bash
-pip install -r api/requirements.txt
-uvicorn api.main:app --host 0.0.0.0 --port 8100
-```
-
-The API starts in **live mode** by default (polling Open Notify). Switch to synthetic via the dashboard toggle or:
-
-```bash
-curl -X POST http://localhost:8100/api/source/synthetic
-```
-
-**3. Start the frontend:**
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5174` in your browser.
 
 ### Docker (Production)
 
@@ -116,9 +123,23 @@ docker compose -f docker-compose.dev.yml up --build
 
 Same ports, but source code is mounted as volumes so changes are picked up automatically — no rebuild needed:
 
-- **API** — uvicorn runs with `--reload`, watches `api/main.py`
+- **API** — uvicorn runs with `--reload`, watches `api/main.py` and `api/catalog.py`
 - **Frontend** — Vite dev server with HMR, watches `frontend/src/`
 - **Generator** — script file is mounted in; restart the container to pick up changes (`docker compose -f docker-compose.dev.yml restart generator`)
+
+## Features
+
+### Real Orbital Elements
+
+The app retrieves CelesTrak's OMM JSON catalog and propagates positions with SGP4. The positions refresh every 30 seconds, while the source catalog is cached for two hours. The catalog includes stations, visual satellites, weather satellites, and science missions (~289 objects).
+
+### Interactive 3D Visualization
+
+Rotate the Earth, zoom in, and select satellite markers to inspect their calculated altitude and speed. The 3D globe renders all catalog satellites as interactive points — cyan for normal, magenta when selected. The ISS orbit trail is drawn as a continuous path. Built with Three.js via react-three-fiber.
+
+### Satellite Catalog and Conjunction Screening
+
+Search objects by name or NORAD ID and view their real-time propagated positions (latitude, longitude, altitude, velocity). The screening panel identifies candidate close approaches using a spatial grid algorithm that avoids O(n^2) pairwise distance checks. Close approaches are color-coded by severity: red (<5 km), orange (<15 km), cyan (>15 km).
 
 ## Anomaly Detection
 
@@ -149,11 +170,16 @@ Telemetry data is stale — the same coordinates are being repeated across conse
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/status` | System status, reading count, anomaly counts by type |
+| GET | `/api/status` | System status, reading count, anomaly counts, catalog size |
 | GET | `/api/positions?limit=100` | Recent position history |
 | GET | `/api/anomalies?limit=50` | Recent detected anomalies |
 | GET | `/api/source` | Current data source mode |
-| POST | `/api/source/{mode}` | Switch data source (`live` or `synthetic`) |
+| POST | `/api/source/{mode}` | Switch data source (`celestrak`, `live`, or `synthetic`) |
+| GET | `/api/catalog/search?q=ISS` | Search catalog by name or NORAD ID |
+| GET | `/api/catalog/stats` | Catalog size, last fetch time, staleness |
+| GET | `/api/catalog/propagate?norad_id=25544` | Propagate a single satellite to current time |
+| GET | `/api/catalog/positions?limit=300` | Propagate all catalog satellites |
+| GET | `/api/screening?threshold_km=50` | Find close approaches within threshold |
 | WS | `/ws` | Real-time position updates and anomaly alerts |
 
 ### WebSocket Message Format
@@ -168,7 +194,7 @@ Telemetry data is stale — the same coordinates are being repeated across conse
     "longitude": -71.0589,
     "altitude_km": 408.3,
     "velocity_km_s": 7.662,
-    "source": "live",
+    "source": "celestrak",
     "anomaly": null
   },
   "anomalies": [],
@@ -180,7 +206,8 @@ Telemetry data is stale — the same coordinates are being repeated across conse
       "connectivity_loss": 4,
       "impossible_coords": 3
     },
-    "source": "live"
+    "source": "celestrak",
+    "catalog_size": 289
   }
 }
 ```
@@ -191,19 +218,24 @@ Telemetry data is stale — the same coordinates are being repeated across conse
 satellite-data-anomalies/
 ├── api/
 │   ├── main.py              # FastAPI app, anomaly detection, WebSocket
+│   ├── catalog.py           # CelesTrak catalog, SGP4 propagation, screening
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   └── Dashboard.jsx # Ground track, telemetry charts, anomaly feed
+│   │   │   ├── Dashboard.jsx      # Main dashboard layout
+│   │   │   ├── Globe.jsx          # Interactive 3D Earth + satellite markers
+│   │   │   ├── CatalogSearch.jsx  # Satellite search by name/NORAD ID
+│   │   │   └── ScreeningPanel.jsx # Conjunction screening alerts
 │   │   ├── hooks/
-│   │   │   └── useSatelliteStream.js  # WebSocket + REST client
+│   │   │   └── useSatelliteStream.js  # WebSocket + REST + catalog client
 │   │   ├── index.css         # Space-themed styles
 │   │   ├── main.jsx
 │   │   └── App.jsx
 │   ├── nginx.conf
 │   ├── Dockerfile
+│   ├── Dockerfile.dev
 │   └── package.json
 ├── scripts/
 │   ├── generate_iss_stream.py  # Synthetic ISS telemetry generator
@@ -221,20 +253,27 @@ satellite-data-anomalies/
 |---|---|
 | **Altitude (orbital)** | Height above Earth's surface. The ISS orbits at approximately 408 km in Low Earth Orbit (LEO). Valid LEO range is roughly 100-1000 km. |
 | **Anomaly** | A data point that deviates significantly from expected behavior — either physically impossible values, unexpected position changes, or stale telemetry. |
+| **CelesTrak** | A website and data service that distributes satellite orbital element sets (TLEs and OMM data) from NORAD/18th Space Defense Squadron. The primary source for publicly available satellite tracking data. |
 | **Comm gap** | A period when the ISS cannot communicate with ground stations because it is not in line-of-sight with a TDRS relay satellite. |
+| **Conjunction** | A close approach between two orbiting objects. Conjunction screening identifies pairs of satellites that pass within a given distance threshold, flagging potential collision risks. |
 | **Data injection** | An adversarial attack where a threat actor inserts fabricated telemetry into the data stream to mislead monitoring systems or mask the satellite's true state. |
 | **Ground track** | The path traced on Earth's surface directly below the satellite as it orbits. The ISS ground track appears as a sinusoidal wave due to its inclined orbit combined with Earth's rotation. |
 | **Inclination** | The angle between the orbital plane and Earth's equator. The ISS has a 51.6-degree inclination, meaning it never passes farther north or south than 51.6 degrees latitude. |
 | **ISS** | International Space Station. A modular space station in low Earth orbit, jointly operated by NASA, Roscosmos, JAXA, ESA, and CSA. |
 | **LEO** | Low Earth Orbit. Orbits with altitudes between roughly 160 km and 2,000 km. The ISS operates in LEO. |
+| **NORAD ID** | A sequential catalog number assigned to every tracked space object by the North American Aerospace Defense Command. The ISS is NORAD 25544. |
+| **OMM** | Orbital Mean-elements Message. A modern JSON/XML format for distributing satellite orbital elements, replacing the legacy two-line element (TLE) format. Used by CelesTrak's GP (General Perturbations) API. |
 | **Open Notify API** | A free public API (`api.open-notify.org`) that provides the current position of the ISS in real time, returning latitude and longitude as JSON. |
 | **Orbital deviation** | An unexpected change in the satellite's position relative to its predicted orbital path. May be caused by planned maneuvers, gravitational perturbation, or spoofed data. |
 | **Orbital period** | The time it takes a satellite to complete one full orbit. The ISS completes one orbit approximately every 92.68 minutes, circling Earth about 15.5 times per day. |
 | **Orbital velocity** | The speed at which a satellite travels along its orbit. The ISS moves at approximately 7.66 km/s (27,600 km/h or 17,150 mph). |
 | **Reboost** | A planned maneuver to raise the ISS's orbit, counteracting gradual altitude decay from atmospheric drag. Uses thrusters from docked spacecraft. |
+| **SGP4** | Simplified General Perturbations 4. The standard analytical orbit propagation model used by NORAD and the space surveillance community. Given a set of orbital elements (from a TLE or OMM record), SGP4 predicts a satellite's position and velocity at any future time, accounting for Earth's oblateness, atmospheric drag, and lunar/solar gravitational effects. |
 | **Stale data** | Telemetry readings that repeat the same values across multiple polling intervals, indicating a communication failure rather than genuine position data. |
 | **TDRS** | Tracking and Data Relay Satellite System. A constellation of NASA communication satellites in geostationary orbit that relay signals between the ISS and ground stations. |
 | **Telemetry** | Data transmitted from a remote source (the satellite) to a receiving station for monitoring. Includes position, altitude, velocity, and system health metrics. |
+| **TEME** | True Equator Mean Equinox. The coordinate frame used by SGP4 for satellite position and velocity output. Positions must be rotated by GMST (Greenwich Mean Sidereal Time) to convert to Earth-fixed (ECEF) coordinates for latitude/longitude. |
+| **TLE** | Two-Line Element set. The legacy fixed-width text format for satellite orbital elements, being superseded by OMM (JSON/XML). Contains the same orbital parameters used by SGP4. |
 | **WAL mode** | Write-Ahead Logging. A SQLite journaling mode that allows concurrent readers and a single writer without blocking, used here so the generator and API can access the database simultaneously. |
 
 ## Why This Matters
@@ -249,10 +288,14 @@ Every six seconds, the International Space Station crosses 46 kilometers of orbi
 
 **What this platform demonstrates:**
 
-1. **Anomaly detection as a security layer.** By modeling expected orbital mechanics and flagging deviations in real time, the system catches not just natural telemetry faults but adversarial manipulation — data injection attacks produce physically impossible coordinates or trajectory discontinuities that betray the fabrication.
+1. **Real orbital mechanics.** SGP4 propagation from authoritative CelesTrak data means the positions on the globe and in the charts are physically accurate — not simulated approximations. The same algorithm used by NORAD for space surveillance.
 
-2. **Dual-source validation.** The toggle between live API data and a synthetic generator with known anomaly injection provides a controlled environment to tune detection thresholds — the same approach used in satellite operations to validate ground software against simulated failure scenarios before trusting it with real missions.
+2. **Anomaly detection as a security layer.** By modeling expected orbital mechanics and flagging deviations in real time, the system catches not just natural telemetry faults but adversarial manipulation — data injection attacks produce physically impossible coordinates or trajectory discontinuities that betray the fabrication.
 
-3. **Continuous monitoring at machine speed.** A human operator watching a telemetry console might catch a sudden position jump. They will not catch a slow, deliberate drift designed to gradually shift the perceived orbit by 0.1 degrees per reading. Automated threshold-based detection runs on every single data point, at every polling interval, without fatigue.
+3. **Conjunction awareness.** The screening algorithm identifies satellites passing dangerously close to each other — the same class of problem that generates conjunction data messages (CDMs) in operational space surveillance. With ~30,000 tracked objects and growing, automated screening is essential.
 
-The ISS is the most visible example, but this pattern — streaming telemetry, physics-based anomaly detection, adversarial threat modeling — applies to the entire growing constellation of LEO assets: Earth observation satellites, communications networks, and the orbital debris tracking systems that keep all of them from colliding.
+4. **Dual-source validation.** The toggle between real catalog data and a synthetic generator with known anomaly injection provides a controlled environment to tune detection thresholds — the same approach used in satellite operations to validate ground software against simulated failure scenarios before trusting it with real missions.
+
+5. **Continuous monitoring at machine speed.** A human operator watching a telemetry console might catch a sudden position jump. They will not catch a slow, deliberate drift designed to gradually shift the perceived orbit by 0.1 degrees per reading. Automated threshold-based detection runs on every single data point, at every polling interval, without fatigue.
+
+The ISS is the most visible example, but this pattern — streaming telemetry, physics-based anomaly detection, conjunction screening, adversarial threat modeling — applies to the entire growing constellation of LEO assets: Earth observation satellites, communications networks, and the orbital debris tracking systems that keep all of them from colliding.

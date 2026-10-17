@@ -1,8 +1,11 @@
 """Satellite anomaly detection API.
 
-Polls the Open Notify ISS API (or reads from the synthetic generator's
-SQLite database) for position data, runs anomaly detection, and pushes
-real-time updates to the React dashboard via WebSocket.
+Supports three data modes:
+  - celestrak: real orbital elements from CelesTrak, propagated with SGP4
+  - live: Open Notify ISS position API (legacy single-satellite)
+  - synthetic: reads from the local SQLite generator
+
+Also provides a satellite catalog search and conjunction screening.
 """
 
 from __future__ import annotations
@@ -17,9 +20,23 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import sys
+
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from catalog import (
+    catalog,
+    fetch_catalog,
+    is_catalog_stale,
+    propagate_all,
+    propagate_satellite,
+    screen_conjunctions,
+    search_catalog,
+)
 
 DB_PATH = os.environ.get(
     "SATELLITE_DB_PATH",
@@ -34,9 +51,7 @@ ISS_ORBITAL_PERIOD = 92.68 * 60
 ISS_INCLINATION = 51.6
 ISS_SPEED_KM_S = 7.66
 ISS_ALTITUDE_KM = 408.0
-MAX_SPEED_DEVIATION = 1.0
-MAX_POSITION_JUMP_DEG = 5.0
-STALE_THRESHOLD_S = 15
+EARTH_RADIUS_KM = 6371.0
 
 # ---------------------------------------------------------------------------
 # State
@@ -48,14 +63,62 @@ stats: dict[str, Any] = {
     "total_readings": 0,
     "total_anomalies": 0,
     "anomalies_by_type": {"orbital_deviation": 0, "connectivity_loss": 0, "impossible_coords": 0},
-    "source": "live",
+    "source": "celestrak",
     "uptime_start": 0,
+    "catalog_size": 0,
 }
-data_source: dict[str, str] = {"mode": "live"}  # "live" or "synthetic"
+data_source: dict[str, str] = {"mode": "celestrak"}
 
 MAX_HISTORY = 500
 MAX_ANOMALY_LOG = 200
 POLL_INTERVAL = 5.0
+CELESTRAK_POLL_INTERVAL = 30.0
+
+import random
+
+def synthetic_catalog_positions(limit: int = 300) -> list[dict]:
+    """Generate synthetic noisy positions for every catalog satellite.
+
+    Uses the real SGP4-propagated position as a base and adds noise + occasional
+    anomalies, so the satellite list matches CelesTrak exactly.
+    """
+    results = []
+    ts = time.time()
+    for sat in catalog.entries.values():
+        base = propagate_satellite(sat, ts)
+        if base is None:
+            continue
+        if random.random() < 0.10:
+            kind = random.choice(["drift", "spike", "stale"])
+            if kind == "drift":
+                base["latitude"] += random.uniform(-8, 8)
+                base["longitude"] += random.uniform(-8, 8)
+                base["altitude_km"] += random.uniform(-30, 60)
+                base["velocity_km_s"] += random.uniform(-0.5, 0.5)
+                base["anomaly"] = "orbital_deviation"
+            elif kind == "spike":
+                base["latitude"] = random.uniform(-180, 180)
+                base["longitude"] = random.uniform(-360, 360)
+                base["altitude_km"] = random.uniform(-100, 2000)
+                base["velocity_km_s"] = random.uniform(0, 30)
+                base["anomaly"] = "impossible_coords"
+            else:
+                base["anomaly"] = "connectivity_loss"
+        else:
+            base["latitude"] += random.gauss(0, 0.15)
+            base["longitude"] += random.gauss(0, 0.15)
+            base["altitude_km"] += random.gauss(0, 1.0)
+            base["velocity_km_s"] += random.gauss(0, 0.03)
+            base["anomaly"] = None
+        base["source"] = "synthetic"
+        base["latitude"] = round(base["latitude"], 4)
+        base["longitude"] = round(base["longitude"], 4)
+        base["altitude_km"] = round(base["altitude_km"], 2)
+        base["velocity_km_s"] = round(base["velocity_km_s"], 3)
+        results.append(base)
+        if limit and len(results) >= limit:
+            break
+    return results
 
 # ---------------------------------------------------------------------------
 # Database helpers
@@ -128,7 +191,6 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
     vel = reading["velocity_km_s"]
     ts = reading["timestamp"]
 
-    # 1. Impossible coordinates
     reasons = []
     if abs(lat) > 90:
         reasons.append(f"latitude {lat}° outside +/-90° range")
@@ -147,12 +209,11 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
             "timestamp": ts,
             "description": ANOMALY_DESCRIPTIONS["impossible_coords"],
             "details": "; ".join(reasons),
-            "reading_id": reading["id"],
+            "reading_id": reading.get("id", ""),
             "latitude": lat,
             "longitude": lon,
         })
 
-    # 2. Connectivity loss (stale data)
     if len(history) >= 2:
         prev = history[-1]
         if prev["timestamp"] == ts or (prev["latitude"] == lat and prev["longitude"] == lon):
@@ -163,12 +224,11 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
                 "timestamp": ts,
                 "description": ANOMALY_DESCRIPTIONS["connectivity_loss"],
                 "details": f"Position identical to previous reading at {prev['timestamp']}",
-                "reading_id": reading["id"],
+                "reading_id": reading.get("id", ""),
                 "latitude": lat,
                 "longitude": lon,
             })
 
-    # 3. Orbital deviation (position jump)
     if len(history) >= 2:
         prev = history[-1]
         dt = ts - prev["timestamp"]
@@ -186,15 +246,12 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
                     "timestamp": ts,
                     "description": ANOMALY_DESCRIPTIONS["orbital_deviation"],
                     "details": f"Position jumped {dlat:.2f}° lat, {dlon:.2f}° lon in {dt}s (max expected: {max_expected:.2f}°)",
-                    "reading_id": reading["id"],
+                    "reading_id": reading.get("id", ""),
                     "latitude": lat,
                     "longitude": lon,
                 })
 
     return anomalies
-
-
-EARTH_RADIUS_KM = 6371.0
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +364,7 @@ async def process_reading(reading: dict) -> None:
         "type": "position_update",
         "reading": reading,
         "anomalies": anomalies,
-        "stats": {**stats, "source": data_source["mode"]},
+        "stats": {**stats, "source": data_source["mode"], "catalog_size": len(catalog.entries)},
     })
 
 
@@ -316,16 +373,54 @@ async def _poll_loop() -> None:
         mode = data_source["mode"]
         stats["source"] = mode
 
-        if mode == "live":
+        if mode == "celestrak":
+            if is_catalog_stale():
+                await fetch_catalog()
+                stats["catalog_size"] = len(catalog.entries)
+
+            # Propagate ISS (NORAD 25544) as the tracked object
+            iss = catalog.entries.get(25544)
+            if iss:
+                pos = propagate_satellite(iss)
+                if pos:
+                    pos["id"] = str(uuid.uuid4())
+                    pos["source"] = "celestrak"
+                    pos["anomaly"] = None
+                    await process_reading(pos)
+
+            await asyncio.sleep(CELESTRAK_POLL_INTERVAL)
+
+        elif mode == "live":
             reading = await fetch_live_position()
             if reading:
                 await process_reading(reading)
-        else:
-            readings = fetch_synthetic_positions()
-            for r in readings:
-                await process_reading(r)
+            await asyncio.sleep(POLL_INTERVAL)
 
-        await asyncio.sleep(POLL_INTERVAL)
+        else:
+            if catalog.entries:
+                sat = random.choice(list(catalog.entries.values()))
+                base = propagate_satellite(sat)
+                if base:
+                    base["id"] = str(uuid.uuid4())
+                    base["source"] = "synthetic"
+                    base["latitude"] += random.gauss(0, 0.15)
+                    base["longitude"] += random.gauss(0, 0.15)
+                    base["altitude_km"] += random.gauss(0, 1.0)
+                    base["velocity_km_s"] += random.gauss(0, 0.03)
+                    if random.random() < 0.12:
+                        kind = random.choice(["orbital_deviation", "impossible_coords", "connectivity_loss"])
+                        base["anomaly"] = kind
+                        if kind == "impossible_coords":
+                            base["latitude"] = random.uniform(-180, 180)
+                            base["longitude"] = random.uniform(-360, 360)
+                    else:
+                        base["anomaly"] = None
+                    await process_reading(base)
+            else:
+                readings = fetch_synthetic_positions()
+                for r in readings:
+                    await process_reading(r)
+            await asyncio.sleep(POLL_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +431,8 @@ async def _poll_loop() -> None:
 async def lifespan(_app: FastAPI):
     init_db()
     stats["uptime_start"] = int(time.time())
+    await fetch_catalog()
+    stats["catalog_size"] = len(catalog.entries)
     task = asyncio.create_task(_poll_loop())
     yield
     task.cancel()
@@ -362,6 +459,8 @@ async def get_status() -> dict:
         "source": data_source["mode"],
         "history_length": len(position_history),
         "anomaly_log_length": len(anomaly_log),
+        "catalog_size": len(catalog.entries),
+        "catalog_stale": is_catalog_stale(),
     }
 
 
@@ -377,8 +476,8 @@ async def get_anomalies(limit: int = 50) -> list[dict]:
 
 @app.post("/api/source/{mode}")
 async def set_source(mode: str) -> dict:
-    if mode not in ("live", "synthetic"):
-        return {"error": "mode must be 'live' or 'synthetic'"}
+    if mode not in ("celestrak", "live", "synthetic"):
+        return {"error": "mode must be 'celestrak', 'live', or 'synthetic'"}
     data_source["mode"] = mode
     position_history.clear()
     anomaly_log.clear()
@@ -394,6 +493,62 @@ async def set_source(mode: str) -> dict:
 @app.get("/api/source")
 async def get_source() -> dict:
     return {"source": data_source["mode"]}
+
+
+# ---------------------------------------------------------------------------
+# Catalog endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/catalog/search")
+async def catalog_search(q: str = Query(..., min_length=1), limit: int = 50) -> list[dict]:
+    if is_catalog_stale() or not catalog.entries:
+        await fetch_catalog()
+    return search_catalog(q, limit)
+
+
+@app.get("/api/catalog/stats")
+async def catalog_stats() -> dict:
+    return {
+        "total_objects": len(catalog.entries),
+        "last_fetched": catalog.last_fetched,
+        "stale": is_catalog_stale(),
+        "error": catalog.fetch_error,
+    }
+
+
+@app.get("/api/catalog/propagate")
+async def catalog_propagate(
+    norad_id: int = Query(...),
+) -> dict:
+    sat = catalog.entries.get(norad_id)
+    if not sat:
+        return {"error": f"NORAD ID {norad_id} not found"}
+    pos = propagate_satellite(sat)
+    if pos is None:
+        return {"error": "SGP4 propagation failed"}
+    return pos
+
+
+@app.get("/api/catalog/positions")
+async def catalog_positions(limit: int = 200) -> list[dict]:
+    """Propagate all catalog satellites to current time.
+
+    In synthetic mode, returns noisy positions with injected anomalies
+    while keeping the same satellite list as CelesTrak.
+    """
+    if is_catalog_stale() or not catalog.entries:
+        await fetch_catalog()
+    if data_source["mode"] == "synthetic":
+        return synthetic_catalog_positions(limit=limit)
+    return propagate_all(limit=limit)
+
+
+@app.get("/api/screening")
+async def get_screening(threshold_km: float = 25.0) -> list[dict]:
+    """Find candidate close approaches."""
+    if not catalog.entries:
+        await fetch_catalog()
+    return screen_conjunctions(threshold_km=threshold_km)
 
 
 @app.websocket("/ws")

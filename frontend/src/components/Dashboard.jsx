@@ -1,3 +1,4 @@
+import { lazy, Suspense, useState, useMemo } from "react";
 import {
   LineChart,
   Line,
@@ -10,6 +11,10 @@ import {
   Scatter,
   ReferenceLine,
 } from "recharts";
+import CatalogSearch from "./CatalogSearch";
+import ScreeningPanel from "./ScreeningPanel";
+
+const Globe = lazy(() => import("./Globe"));
 
 const SEVERITY_CONFIG = {
   critical: { color: "#ff3b3b", bg: "rgba(255, 59, 59, 0.12)", label: "CRITICAL" },
@@ -57,6 +62,12 @@ function StatsBar({ stats }) {
         </div>
         <div className="stat-label">Impossible Coords</div>
       </div>
+      {stats.catalog_size > 0 && (
+        <div className="stat-card">
+          <div className="stat-value glow-green">{stats.catalog_size}</div>
+          <div className="stat-label">Catalog Objects</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -65,18 +76,18 @@ function SourceToggle({ source, onSwitch }) {
   return (
     <div className="source-toggle">
       <button
-        className={`toggle-btn ${source === "live" ? "active" : ""}`}
-        onClick={() => onSwitch("live")}
+        className={`toggle-btn ${source === "celestrak" ? "active" : ""}`}
+        onClick={() => onSwitch("celestrak")}
       >
-        <span className="toggle-dot live" />
-        Open Notify (Live)
+        <span className="toggle-dot celestrak" />
+        CelesTrak (SGP4)
       </button>
       <button
         className={`toggle-btn ${source === "synthetic" ? "active" : ""}`}
         onClick={() => onSwitch("synthetic")}
       >
         <span className="toggle-dot synthetic" />
-        Synthetic Generator
+        Synthetic
       </button>
     </div>
   );
@@ -127,15 +138,23 @@ function GroundTrack({ positions }) {
   );
 }
 
-function TelemetryCharts({ positions }) {
-  const data = positions.slice(-60).map((p, i) => ({
+function TelemetryCharts({ positions, selectedSatData }) {
+  const source = selectedSatData
+    ? [selectedSatData]
+    : positions.slice(-60);
+
+  const data = source.map((p, i) => ({
     tick: i,
     lat: p.latitude,
     lon: p.longitude,
     alt: p.altitude_km,
     vel: p.velocity_km_s,
-    time: new Date(p.timestamp * 1000).toLocaleTimeString(),
+    time: p.timestamp
+      ? new Date(p.timestamp * 1000).toLocaleTimeString()
+      : "now",
   }));
+
+  const label = selectedSatData ? selectedSatData.name : "ISS";
 
   const chartProps = {
     margin: { top: 5, right: 10, bottom: 5, left: 5 },
@@ -147,6 +166,11 @@ function TelemetryCharts({ positions }) {
 
   return (
     <div className="telemetry-grid">
+      {selectedSatData && (
+        <div className="telemetry-label" style={{ gridColumn: "1 / -1" }}>
+          Showing: <strong>{label}</strong> (NORAD {selectedSatData.norad_id})
+        </div>
+      )}
       <div className="chart-card">
         <h3>
           Latitude <span className="current-val">{data[data.length - 1]?.lat?.toFixed(4) ?? "--"}°</span>
@@ -185,8 +209,7 @@ function TelemetryCharts({ positions }) {
           <LineChart data={data} {...chartProps}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1a2a4a" />
             <XAxis dataKey="time" {...axisProps} interval="preserveStartEnd" />
-            <YAxis domain={[350, 450]} width={35} {...axisProps} />
-            <ReferenceLine y={408} stroke="#00ff88" strokeDasharray="3 3" strokeOpacity={0.4} />
+            <YAxis domain={["auto", "auto"]} width={45} {...axisProps} />
             <Line type="monotone" dataKey="alt" stroke="#00ff88" strokeWidth={2} dot={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
@@ -200,8 +223,7 @@ function TelemetryCharts({ positions }) {
           <LineChart data={data} {...chartProps}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1a2a4a" />
             <XAxis dataKey="time" {...axisProps} interval="preserveStartEnd" />
-            <YAxis domain={[7.0, 8.5]} width={35} {...axisProps} />
-            <ReferenceLine y={7.66} stroke="#ffaa00" strokeDasharray="3 3" strokeOpacity={0.4} />
+            <YAxis domain={["auto", "auto"]} width={45} {...axisProps} />
             <Line type="monotone" dataKey="vel" stroke="#ffaa00" strokeWidth={2} dot={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
@@ -253,7 +275,18 @@ export default function Dashboard({
   source,
   connected,
   switchSource,
+  searchCatalog,
+  catalogPositions,
+  screeningResults,
+  propagateSatellite,
 }) {
+  const [selectedSat, setSelectedSat] = useState(null);
+
+  const selectedSatData = useMemo(() => {
+    if (selectedSat == null) return null;
+    return catalogPositions.find((s) => s.norad_id === selectedSat) || null;
+  }, [selectedSat, catalogPositions]);
+
   const latest = positions[positions.length - 1];
 
   return (
@@ -282,14 +315,24 @@ export default function Dashboard({
             <strong>{latest.longitude?.toFixed(4)}°</strong> | Alt:{" "}
             <strong>{latest.altitude_km?.toFixed(1)} km</strong> | Speed:{" "}
             <strong>{latest.velocity_km_s?.toFixed(3)} km/s</strong> |
-            Source: <strong className={source === "live" ? "source-live" : "source-synth"}>{source}</strong>
+            Source: <strong className={`source-${source}`}>{source}</strong>
           </span>
         </div>
       )}
 
       <StatsBar stats={stats} />
+
+      <Suspense fallback={<div className="chart-card wide" style={{ height: 460, display: "flex", alignItems: "center", justifyContent: "center", color: "#5a7a9a" }}>Loading 3D globe...</div>}>
+        <Globe catalogPositions={catalogPositions} issPositions={positions} selectedSat={selectedSat} onSelectSat={setSelectedSat} />
+      </Suspense>
+
+      <div className="side-panels">
+        <CatalogSearch catalogPositions={catalogPositions} selectedSat={selectedSat} onSelectSat={setSelectedSat} />
+        <ScreeningPanel screeningResults={screeningResults} />
+      </div>
+
       <GroundTrack positions={positions} />
-      <TelemetryCharts positions={positions} />
+      <TelemetryCharts positions={positions} selectedSatData={selectedSatData} />
       <AnomalyFeed anomalies={anomalies} />
     </div>
   );

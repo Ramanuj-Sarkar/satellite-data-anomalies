@@ -2,8 +2,18 @@ import { useSatelliteStream } from "./hooks/useSatelliteStream";
 import Dashboard from "./components/Dashboard";
 
 export default function App() {
-  const { positions, anomalies, stats, source, connected, switchSource } =
-    useSatelliteStream();
+  const {
+    positions,
+    anomalies,
+    stats,
+    source,
+    connected,
+    switchSource,
+    searchCatalog,
+    catalogPositions,
+    screeningResults,
+    propagateSatellite,
+  } = useSatelliteStream();
 
   return (
     <Dashboard
@@ -13,6 +23,10 @@ export default function App() {
       source={source}
       connected={connected}
       switchSource={switchSource}
+      searchCatalog={searchCatalog}
+      catalogPositions={catalogPositions}
+      screeningResults={screeningResults}
+      propagateSatellite={propagateSatellite}
     />
   );
 }

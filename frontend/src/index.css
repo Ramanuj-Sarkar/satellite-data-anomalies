@@ -523,6 +523,60 @@ body {
   letter-spacing: 0;
 }
 
+.catalog-search-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.catalog-search-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.catalog-search-input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.15);
+}
+
+.catalog-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.catalog-search-btn {
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--cyan);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.catalog-search-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--cyan);
+}
+
+.catalog-no-match {
+  font-size: 11px;
+  color: var(--red);
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
 .catalog-list {
   max-height: 360px;
   overflow-y: auto;

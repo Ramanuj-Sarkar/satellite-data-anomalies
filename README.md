@@ -149,7 +149,7 @@ Rotate the Earth, zoom in, and click any satellite dot to inspect it. The 3D glo
 
 ### Satellite Catalog and Selection Sync
 
-The catalog panel shows all satellites in a scrollable alphabetical list. Clicking a satellite name selects it everywhere: the globe highlights and labels the dot, the telemetry charts (latitude, longitude, altitude, velocity) update to show that satellite's data, and the catalog list scrolls to keep the selection visible. Selection works bidirectionally — pick from the list or click on the globe.
+The catalog panel shows all satellites in a scrollable alphabetical list with a search box at the top. Type a satellite name or NORAD ID and hit Enter (or click Search) to jump straight to a match — the satellite is selected in the list, highlighted on the globe with a label, and its data appears in the telemetry charts. If there's no match, a "No match found" message is shown. Clicking a satellite name in the list or clicking a dot on the globe does the same thing — selection is bidirectional and stays in sync across all three views (catalog list, 3D globe, telemetry charts).
 
 ### Conjunction Screening
 

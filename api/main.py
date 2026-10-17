@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import sqlite3
 import time
 import uuid
@@ -20,7 +21,10 @@ import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "satellite.db")
+DB_PATH = os.environ.get(
+    "SATELLITE_DB_PATH",
+    str(Path(__file__).resolve().parent.parent / "data" / "satellite.db"),
+)
 
 # ---------------------------------------------------------------------------
 # ISS orbital constants for anomaly detection

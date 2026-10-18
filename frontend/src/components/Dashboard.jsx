@@ -232,8 +232,11 @@ function TelemetryCharts({ positions, selectedSatData }) {
   );
 }
 
-function AnomalyFeed({ anomalies }) {
-  const reversed = [...anomalies].reverse();
+function AnomalyFeed({ anomalies, selectedSat }) {
+  const filtered = selectedSat != null
+    ? anomalies.filter((a) => a.norad_id === selectedSat)
+    : anomalies;
+  const reversed = [...filtered].reverse();
 
   return (
     <div className="anomaly-feed">
@@ -287,7 +290,31 @@ export default function Dashboard({
     return catalogPositions.find((s) => s.norad_id === selectedSat) || null;
   }, [selectedSat, catalogPositions]);
 
-  const latest = positions[positions.length - 1];
+  const filteredPositions = useMemo(() => {
+    if (selectedSat == null) return positions;
+    return positions.filter((p) => p.norad_id === selectedSat);
+  }, [positions, selectedSat]);
+
+  const filteredAnomalies = useMemo(() => {
+    if (selectedSat == null) return anomalies;
+    return anomalies.filter((a) => a.norad_id === selectedSat);
+  }, [anomalies, selectedSat]);
+
+  const displayStats = useMemo(() => {
+    if (selectedSat == null) return stats;
+    const byType = { orbital_deviation: 0, connectivity_loss: 0, impossible_coords: 0 };
+    for (const a of filteredAnomalies) {
+      if (a.type in byType) byType[a.type]++;
+    }
+    return {
+      ...stats,
+      total_readings: filteredPositions.length,
+      total_anomalies: filteredAnomalies.length,
+      anomalies_by_type: byType,
+    };
+  }, [selectedSat, stats, filteredPositions, filteredAnomalies]);
+
+  const latest = filteredPositions[filteredPositions.length - 1] || positions[positions.length - 1];
 
   return (
     <div className="dashboard">
@@ -311,7 +338,7 @@ export default function Dashboard({
       {latest && (
         <div className="current-position">
           <span>
-            ISS Position: <strong>{latest.latitude?.toFixed(4)}°</strong>,{" "}
+            {selectedSatData ? selectedSatData.name : "ISS"} Position: <strong>{latest.latitude?.toFixed(4)}°</strong>,{" "}
             <strong>{latest.longitude?.toFixed(4)}°</strong> | Alt:{" "}
             <strong>{latest.altitude_km?.toFixed(1)} km</strong> | Speed:{" "}
             <strong>{latest.velocity_km_s?.toFixed(3)} km/s</strong> |
@@ -320,7 +347,7 @@ export default function Dashboard({
         </div>
       )}
 
-      <StatsBar stats={stats} />
+      <StatsBar stats={displayStats} />
 
       <Suspense fallback={<div className="chart-card wide" style={{ height: 460, display: "flex", alignItems: "center", justifyContent: "center", color: "#5a7a9a" }}>Loading 3D globe...</div>}>
         <Globe catalogPositions={catalogPositions} issPositions={positions} selectedSat={selectedSat} onSelectSat={setSelectedSat} />
@@ -333,7 +360,7 @@ export default function Dashboard({
 
       <GroundTrack positions={positions} />
       <TelemetryCharts positions={positions} selectedSatData={selectedSatData} />
-      <AnomalyFeed anomalies={anomalies} />
+      <AnomalyFeed anomalies={anomalies} selectedSat={selectedSat} />
     </div>
   );
 }

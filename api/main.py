@@ -190,6 +190,8 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
     alt = reading["altitude_km"]
     vel = reading["velocity_km_s"]
     ts = reading["timestamp"]
+    norad_id = reading.get("norad_id")
+    sat_name = reading.get("name")
 
     reasons = []
     if abs(lat) > 90:
@@ -212,6 +214,8 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
             "reading_id": reading.get("id", ""),
             "latitude": lat,
             "longitude": lon,
+            "norad_id": norad_id,
+            "name": sat_name,
         })
 
     if len(history) >= 2:
@@ -227,6 +231,8 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
                 "reading_id": reading.get("id", ""),
                 "latitude": lat,
                 "longitude": lon,
+                "norad_id": norad_id,
+                "name": sat_name,
             })
 
     if len(history) >= 2:
@@ -249,6 +255,8 @@ def detect_anomalies(reading: dict, history: list[dict]) -> list[dict]:
                     "reading_id": reading.get("id", ""),
                     "latitude": lat,
                     "longitude": lon,
+                    "norad_id": norad_id,
+                    "name": sat_name,
                 })
 
     return anomalies
